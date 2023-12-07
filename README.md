@@ -1,6 +1,6 @@
 # Improvement Experiments on DDPM-based Diffusion Model for Time Series
 
-### Overview
+## Overview
 This project focuses on enhancing diffusion models for time series data, specifically improving the Conditional Score-based Diffusion Model (CSDI). Our goal was to test the potential of improving performance or speed by applying methods from other papers to CSDI and to deepen our understanding of diffusion models.
 
 ### Key Contributions
