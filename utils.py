@@ -3,7 +3,10 @@ import torch
 from torch.optim import Adam
 from tqdm import tqdm
 import pickle
+import time
+import json
 
+import log_util
 
 def train(
     model,
@@ -12,7 +15,10 @@ def train(
     valid_loader=None,
     valid_epoch_interval=20,
     foldername="",
+    logger=log_util.get_stdout_logger()
 ):
+    logger.info("train.start")
+
     optimizer = Adam(model.parameters(), lr=config["lr"], weight_decay=1e-6)
     if foldername != "":
         output_path = foldername + "/model.pth"
@@ -24,7 +30,11 @@ def train(
     )
 
     best_valid_loss = 1e10
-    for epoch_no in range(config["epochs"]):
+    epochs = config["epochs"]
+    for epoch_no in range(epochs):
+        start_t = time.time()
+        logger.info(f"train.epoch:{epoch_no}/{epochs}")
+
         avg_loss = 0
         model.train()
         with tqdm(train_loader, mininterval=5.0, maxinterval=50.0) as it:
@@ -46,7 +56,13 @@ def train(
                     break
 
             lr_scheduler.step()
+
+        end_t = time.time()
+        logger.info(f"train.epoch:{epoch_no}/{epochs}.train elapse:{end_t-start_t:.1f}")
+
         if valid_loader is not None and (epoch_no + 1) % valid_epoch_interval == 0:
+            logger.info(f"train.epoch:{epoch_no}/{epochs}.validation.start")
+
             model.eval()
             avg_loss_valid = 0
             with torch.no_grad():
@@ -70,8 +86,13 @@ def train(
                     epoch_no,
                 )
 
+            logger.info(f"train.epoch:{epoch_no}/{epochs}.validation.end")
+
     if foldername != "":
         torch.save(model.state_dict(), output_path)
+        logger.info(f"train.save:{output_path}")
+
+    logger.info("train.end")
 
 
 def quantile_loss(target, forecast, q: float, eval_points) -> float:
@@ -117,7 +138,8 @@ def calc_quantile_CRPS_sum(target, forecast, eval_points, mean_scaler, scaler):
         CRPS += q_loss / denom
     return CRPS.item() / len(quantiles)
 
-def evaluate(model, test_loader, nsample=100, scaler=1, mean_scaler=0, foldername=""):
+def evaluate(model, test_loader, nsample=100, scaler=1, mean_scaler=0, foldername="", logger=log_util.get_stdout_logger()):
+    logger.info("evaluate.start")
 
     with torch.no_grad():
         model.eval()
@@ -131,7 +153,10 @@ def evaluate(model, test_loader, nsample=100, scaler=1, mean_scaler=0, foldernam
         all_evalpoint = []
         all_generated_samples = []
         with tqdm(test_loader, mininterval=5.0, maxinterval=50.0) as it:
+            total_batch = len(test_loader)
             for batch_no, test_batch in enumerate(it, start=1):
+                logger.info(f"batch:{batch_no}/{total_batch}")
+
                 output = model.evaluate(test_batch, nsample)
 
                 samples, c_target, eval_points, observed_points, observed_time = output
@@ -158,14 +183,12 @@ def evaluate(model, test_loader, nsample=100, scaler=1, mean_scaler=0, foldernam
                 mae_total += mae_current.sum().item()
                 evalpoints_total += eval_points.sum().item()
 
-                it.set_postfix(
-                    ordered_dict={
+                current_results = {
                         "rmse_total": np.sqrt(mse_total / evalpoints_total),
                         "mae_total": mae_total / evalpoints_total,
                         "batch_no": batch_no,
-                    },
-                    refresh=True,
-                )
+                    }
+                logger.info("current results:\n"+json.dumps(current_results, indent=4))
 
             with open(
                 foldername + "/generated_outputs_nsample" + str(nsample) + ".pk", "wb"
@@ -207,7 +230,9 @@ def evaluate(model, test_loader, nsample=100, scaler=1, mean_scaler=0, foldernam
                     ],
                     f,
                 )
-                print("RMSE:", np.sqrt(mse_total / evalpoints_total))
-                print("MAE:", mae_total / evalpoints_total)
-                print("CRPS:", CRPS)
-                print("CRPS_sum:", CRPS_sum)
+                logger.info(f"evaluate.RMSE:" + str(np.sqrt(mse_total / evalpoints_total)))
+                logger.info(f"evaluate.MAE:" + str(mae_total / evalpoints_total))
+                logger.info("evaluate.CRPS:" + str(CRPS))
+                logger.info("evaluate.CRPS_sum:" + str(CRPS_sum))
+
+    logger.info("evaluate.end")

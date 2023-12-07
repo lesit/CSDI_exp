@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 from torch.utils.data import DataLoader, Dataset
 
+import log_util
+
 # 35 attributes which contains enough non-values
 attributes = ['DiasABP', 'HR', 'Na', 'Lactate', 'NIDiasABP', 'PaO2', 'WBC', 'pH', 'Albumin', 'ALT', 'Glucose', 'SaO2',
               'Temp', 'AST', 'Bilirubin', 'HCO3', 'BUN', 'RespRate', 'Mg', 'HCT', 'SysABP', 'FiO2', 'K', 'GCS',
@@ -71,7 +73,9 @@ def get_idlist():
 
 
 class Physio_Dataset(Dataset):
-    def __init__(self, eval_length=48, use_index_list=None, missing_ratio=0.0, seed=0):
+    def __init__(self, eval_length=48, use_index_list=None, missing_ratio=0.0, seed=0, logger=log_util.get_stdout_logger()):
+        logger.info("Physio_Dataset.init.start")
+
         self.eval_length = eval_length
         np.random.seed(seed)  # seed for ground truth choice
 
@@ -84,7 +88,7 @@ class Physio_Dataset(Dataset):
 
         if os.path.isfile(path) == False:  # if datasetfile is none, create
             idlist = get_idlist()
-            for id_ in idlist:
+            for idx, id_ in enumerate(idlist):
                 try:
                     observed_values, observed_masks, gt_masks = parse_id(
                         id_, missing_ratio
@@ -93,8 +97,12 @@ class Physio_Dataset(Dataset):
                     self.observed_masks.append(observed_masks)
                     self.gt_masks.append(gt_masks)
                 except Exception as e:
-                    print(id_, e)
+                    logger.error(f"Physio_Dataset.{id_}: " + str(e))
                     continue
+
+                if idx % 1000 == 0:
+                    logger.info(f"Physio_Dataset.init: create idlist:{idx}/{len(idlist)}")
+
             self.observed_values = np.array(self.observed_values)
             self.observed_masks = np.array(self.observed_masks)
             self.gt_masks = np.array(self.gt_masks)
@@ -127,6 +135,8 @@ class Physio_Dataset(Dataset):
         else:
             self.use_index_list = use_index_list
 
+        logger.info("Physio_Dataset.init.end")
+
     def __getitem__(self, org_index):
         index = self.use_index_list[org_index]
         s = {
@@ -141,10 +151,11 @@ class Physio_Dataset(Dataset):
         return len(self.use_index_list)
 
 
-def get_dataloader(seed=1, nfold=None, batch_size=16, missing_ratio=0.1):
+def get_dataloader(seed=1, nfold=None, batch_size=16, missing_ratio=0.1, logger=log_util.get_stdout_logger()):
+    logger.info("get_dataloader.start")
 
     # only to obtain total length of dataset
-    dataset = Physio_Dataset(missing_ratio=missing_ratio, seed=seed)
+    dataset = Physio_Dataset(missing_ratio=missing_ratio, seed=seed, logger=logger)
     indlist = np.arange(len(dataset))
 
     np.random.seed(seed)
@@ -166,6 +177,7 @@ def get_dataloader(seed=1, nfold=None, batch_size=16, missing_ratio=0.1):
         use_index_list=train_index, missing_ratio=missing_ratio, seed=seed
     )
     train_loader = DataLoader(dataset, batch_size=batch_size, shuffle=1)
+    
     valid_dataset = Physio_Dataset(
         use_index_list=valid_index, missing_ratio=missing_ratio, seed=seed
     )
@@ -174,4 +186,6 @@ def get_dataloader(seed=1, nfold=None, batch_size=16, missing_ratio=0.1):
         use_index_list=test_index, missing_ratio=missing_ratio, seed=seed
     )
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=0)
+
+    logger.info("get_dataloader.end")
     return train_loader, valid_loader, test_loader

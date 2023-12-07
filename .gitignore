@@ -1,0 +1,4 @@
+*.pth
+*.gz
+*.zip
+/save

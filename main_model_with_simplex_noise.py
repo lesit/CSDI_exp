@@ -1,24 +1,57 @@
+from typing import Any
 import numpy as np
 import torch
 import torch.nn as nn
 from diff_models import diff_CSDI
 
+from simplex import Simplex_CLASS
+
 import enum
-class SampleType(enum.Enum):
-    csdi_ddpm_nose = 0
-    ddim_generalized = 1
+
+class NoiseGenerator:
+    class NoiseType(enum.Enum):
+        gaussian = 0
+        simplex = 1
+
+    def __init__(self, noise_type:NoiseType) -> None:
+        if noise_type == NoiseGenerator.NoiseType.gaussian:
+            self.noise_fn = lambda x, t: torch.randn_like(x)
+        else:
+            self.simplex = Simplex_CLASS()
+            self.noise_fn = lambda x, t: self.__generate_simplex_noise(x, t)
+
+    def __call__(self, x, t) -> Any:
+        return self.noise_fn(x, t)
         
-np.seterr('raise') 
+    def __generate_simplex_noise(
+            self, x, t, octave=6, persistence=0.8, frequency=64
+            ):
+        if torch.is_tensor(t):
+            t = t.detach().cpu().numpy()
+        else:
+            t = np.asarray([t])
+
+        self.simplex.newSeed()
+        noise = torch.from_numpy(
+                        self.simplex.rand_3d_fixed_T_octaves(
+                                x.shape[-2:], t, octave,
+                                persistence, frequency
+                                )
+                        )
+        
+        if noise.shape[0]==1:
+            noise = noise.repeat(x.shape[0], 1, 1)
+
+        return noise.to(x.device)
+
 
 class CSDI_base(nn.Module):
-    def __init__(self, sample_type, ddim_eta, target_dim, config, device):
+    def __init__(self, target_dim, config, device, noise_gen):
         super().__init__()
         self.device = device
         self.target_dim = target_dim
+        self.noise_gen = noise_gen
 
-        self.sample_type = sample_type
-        self.ddim_eta = ddim_eta
-        
         self.emb_time_dim = config["model"]["timeemb"]
         self.emb_feature_dim = config["model"]["featureemb"]
         self.is_unconditional = config["model"]["is_unconditional"]
@@ -39,11 +72,6 @@ class CSDI_base(nn.Module):
 
         # parameters for diffusion models
         self.num_steps = config_diff["num_steps"]
-        
-        self.timesteps = config_diff.get("timesteps")
-        if self.sample_type == SampleType.csdi_ddpm_nose or self.timesteps is None:
-            self.timesteps = self.num_steps
-                
         if config_diff["schedule"] == "quad":
             self.beta = np.linspace(
                 config_diff["beta_start"] ** 0.5, config_diff["beta_end"] ** 0.5, self.num_steps
@@ -136,7 +164,8 @@ class CSDI_base(nn.Module):
         else:
             t = torch.randint(0, self.num_steps, [B]).to(self.device)
         current_alpha = self.alpha_torch[t]  # (B,1,1)
-        noise = torch.randn_like(observed_data)
+        noise = self.noise_gen(observed_data, t if is_train else set_t)
+        # noise1 = self.noise_gen(observed_data, 0)
         noisy_data = (current_alpha ** 0.5) * observed_data + (1.0 - current_alpha) ** 0.5 * noise
 
         total_input = self.set_input_to_diffmodel(noisy_data, observed_data, cond_mask)
@@ -164,23 +193,19 @@ class CSDI_base(nn.Module):
 
         imputed_samples = torch.zeros(B, n_samples, K, L).to(self.device)
 
-        skip = self.num_steps // self.timesteps
-        seq = list(range(0, self.num_steps, skip))
-        seq_next = [-1] + list(seq[:-1])
-
         for i in range(n_samples):
             # generate noisy observation for unconditional model
             if self.is_unconditional == True:
                 noisy_obs = observed_data
                 noisy_cond_history = []
                 for t in range(self.num_steps):
-                    noise = torch.randn_like(noisy_obs)
+                    noise = self.noise_gen(noisy_obs, t)
                     noisy_obs = (self.alpha_hat[t] ** 0.5) * noisy_obs + self.beta[t] ** 0.5 * noise
                     noisy_cond_history.append(noisy_obs * cond_mask)
 
             current_sample = torch.randn_like(observed_data)
 
-            for t, t_next in zip(reversed(seq), reversed(seq_next)):
+            for t in range(self.num_steps - 1, -1, -1):
                 if self.is_unconditional == True:
                     diff_input = cond_mask * noisy_cond_history[t] + (1.0 - cond_mask) * current_sample
                     diff_input = diff_input.unsqueeze(1)  # (B,1,K,L)
@@ -190,39 +215,16 @@ class CSDI_base(nn.Module):
                     diff_input = torch.cat([cond_obs, noisy_target], dim=1)  # (B,2,K,L)
                 predicted = self.diffmodel(diff_input, side_info, torch.tensor([t]).to(self.device))
 
-                if self.sample_type == SampleType.csdi_ddpm_nose:
-                    coeff1 = 1 / self.alpha_hat[t] ** 0.5       # alpha_hat -> 1 - beta
-                    coeff2 = (1 - self.alpha_hat[t]) / (1 - self.alpha[t]) ** 0.5
+                coeff1 = 1 / self.alpha_hat[t] ** 0.5
+                coeff2 = (1 - self.alpha_hat[t]) / (1 - self.alpha[t]) ** 0.5
+                current_sample = coeff1 * (current_sample - coeff2 * predicted)
 
-                    current_sample = coeff1 * (current_sample - coeff2 * predicted)
-                    # coeff1 = 1 / (1 - self.beta[t]) ** 0.5       # alpha_hat -> 1 - beta
-                    # coeff2 = self.beta[t] / (1 - self.alpha[t]) ** 0.5
-                    # current_sample = coeff1 * (current_sample - coeff2 * predicted) # model mean
-
-                    if t_next >= 0:
-                        noise = torch.randn_like(current_sample)
-                        # beta[t] -> 1 - alpha[t]/alpha[t_next]
-                        sigma = (
-                            (1.0 - self.alpha[t_next]) / (1.0 - self.alpha[t]) * self.beta[t]    
-                        ) ** 0.5
-                        current_sample += sigma * noise
-                elif self.sample_type == SampleType.ddim_generalized:
-                    x0_t = (current_sample - predicted * ((1 - self.alpha[t]) ** 0.5)) / (self.alpha[t] ** 0.5)  # 19p. 두번째 식. 첫번째 항
-
-                    # a = (1 - self.alpha[t] / self.alpha[t_next]) * (1 - self.alpha[t_next]) / (1 - self.alpha[t])
-                    if self.ddim_eta>0:
-                        c1 = (
-                            self.ddim_eta * (((1 - self.alpha[t] / self.alpha[t_next]) * (1 - self.alpha[t_next]) / (1 - self.alpha[t])) ** 0.5)  # sigma
-                        )
-                    else:
-                        c1 = 0
-                    c2 = ((1 - self.alpha[t_next]) - c1 ** 2) ** 0.5   # 19p. 두번째 식. 두번째 항
-                    xt_next = self.alpha[t_next] ** 0.5 * x0_t + c2 * predicted    # 19p. 두번째 식.
-                    if t>0:
-                        noise = torch.randn_like(current_sample)
-                        xt_next += c1 * noise
-
-                    current_sample = xt_next
+                if t > 0:
+                    noise = self.noise_gen(current_sample, t)
+                    sigma = (
+                        (1.0 - self.alpha[t - 1]) / (1.0 - self.alpha[t]) * self.beta[t]
+                    ) ** 0.5
+                    current_sample += sigma * noise
 
             imputed_samples[:, i] = current_sample.detach()
         return imputed_samples
@@ -275,8 +277,8 @@ class CSDI_base(nn.Module):
 
 
 class CSDI_PM25(CSDI_base):
-    def __init__(self, sample_type, ddim_eta, config, device, target_dim=36):
-        super(CSDI_PM25, self).__init__(sample_type, ddim_eta, target_dim, config, device)
+    def __init__(self, config, device, target_dim=36):
+        super(CSDI_PM25, self).__init__(target_dim, config, device)
 
     def process_data(self, batch):
         observed_data = batch["observed_data"].to(self.device).float()
@@ -302,8 +304,8 @@ class CSDI_PM25(CSDI_base):
 
 
 class CSDI_Physio(CSDI_base):
-    def __init__(self, sample_type, ddim_eta, config, device, target_dim=35):
-        super(CSDI_Physio, self).__init__(sample_type, ddim_eta, target_dim, config, device)
+    def __init__(self, config, device, noise_gen, target_dim=35):
+        super(CSDI_Physio, self).__init__(target_dim, config, device, noise_gen=noise_gen)
 
     def process_data(self, batch):
         observed_data = batch["observed_data"].to(self.device).float()
@@ -327,11 +329,9 @@ class CSDI_Physio(CSDI_base):
             cut_length,
         )
 
-import log_util
-
 class CSDI_Forecasting(CSDI_base):
-    def __init__(self, sample_type, ddim_eta, config, device, target_dim, logger=log_util.get_stdout_logger()):
-        super(CSDI_Forecasting, self).__init__(sample_type, ddim_eta, target_dim, config, device)
+    def __init__(self, config, device, target_dim, noise_gen):
+        super(CSDI_Forecasting, self).__init__(target_dim, config, device, noise_gen=noise_gen)
         self.target_dim_base = target_dim
         self.num_sample_features = config["model"]["num_sample_features"]
 

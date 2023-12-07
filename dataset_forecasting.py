@@ -3,9 +3,10 @@ from torch.utils.data import DataLoader, Dataset
 import pandas as pd
 import numpy as np
 import torch
+import log_util
 
 class Forecasting_Dataset(Dataset):
-    def __init__(self, datatype, mode="train"):
+    def __init__(self, datatype, mode="train", logger=log_util.get_stdout_logger()):
         self.history_length = 168
         self.pred_length = 24
 
@@ -58,7 +59,9 @@ class Forecasting_Dataset(Dataset):
     def __len__(self):
         return len(self.use_index)
 
-def get_dataloader(datatype,device,batch_size=8):
+def get_dataloader(datatype,device,batch_size=8, logger=log_util.get_stdout_logger()):
+    logger.info("get_dataloader.start")
+
     dataset = Forecasting_Dataset(datatype,mode='train')
     train_loader = DataLoader(
         dataset, batch_size=batch_size, shuffle=1)
@@ -71,5 +74,7 @@ def get_dataloader(datatype,device,batch_size=8):
 
     scaler = torch.from_numpy(dataset.std_data).to(device).float()
     mean_scaler = torch.from_numpy(dataset.mean_data).to(device).float()
+
+    logger.info("get_dataloader.end")
 
     return train_loader, valid_loader, test_loader, scaler, mean_scaler

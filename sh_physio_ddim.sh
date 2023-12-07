@@ -1,0 +1,1 @@
+nohup python exe_physio.py --testmissingratio 0.1 --config "base_ddim.yaml" --sample_type "ddim_generalized" --nsample 100 --timesteps 25 --modelpath "/workspace/CSDI/save/gaussian_noise/physio_fold0_missing10p_20231204_154445/model.pth" > /dev/null 2>&1 &
