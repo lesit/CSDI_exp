@@ -1,20 +1,20 @@
 # Improvement Experiments on DDPM-based Diffusion Model for Time Series
 
-# Overview
+## Overview
 This project focuses on enhancing diffusion models for time series data, specifically improving the Conditional Score-based Diffusion Model (CSDI). Our goal was to test the potential of improving performance or speed by applying methods from other papers to CSDI and to deepen our understanding of diffusion models.
 
-# Key Contributions
+## Key Contributions
 - Exploration of noise variation (Simplex noise vs. Gaussian noise) in diffusion models.
 - Implementation of an ODE solver for handling long sampling distances, a known limitation in DDPM.
 - Comparative analysis of DDPM and DDIM methodologies for efficiency and performance.
 - Development and analysis of enhanced models using a healthcare dataset from the PhysioNet Challenge 2012.
 
-# Repository Contents
+## Repository Contents
 - Experimental code for model development and analysis.
 - Data preprocessing and analysis scripts.
 - Documentation of methodologies and results.
 
-# Future Work
+## Future Work
 - We plan to extend our research to generative models for time series data and explore reinforcement learning using data augmented by these generative models.
 --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 # CSDI
