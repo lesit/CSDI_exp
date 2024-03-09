@@ -1,0 +1,97 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "ddim imputation healthcare dataset",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/exe_physio.py",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "--testmissingratio", "0.1",
+                "--nsample", "100",
+                "--num_timesteps", "50",
+                "--timesteps", "25",
+                "--noise_fn", "gaussian",
+                "--sample_type", "ddim_generalized",
+                "--config", "base_ddim.yaml",
+                "--modelpath", "/workspace/CSDI/save/gaussian_noise/physio_fold0_missing10p_20231204_154445/model.pth"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "imputation healthcare dataset",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/exe_physio.py",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "--testmissingratio", "0.1",
+                "--nsample", "10",
+                "--noise_fn", "gaussian",
+                "--sample_type", "csdi_ddpm_nose",
+                "--modelpath", "/workspace/CSDI/save/gaussian_noise/physio_fold0_missing10p_20231204_154445/model.pth"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "training and imputation healthcare dataset",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/exe_physio.py",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "--testmissingratio", "0.1",
+                "--nsample", "100",
+                "--noise_fn", "gaussian",
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "forecasting electricity",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/exe_forecasting.py",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "--datatype", "electricity",
+                "--nsample", "100",
+                "--modelpath", "/workspace/CSDI/save/gaussian_noise/forecasting_electricity_20231202_171009/model.pth"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "training and forecasting electricity",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/exe_forecasting.py",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "--datatype", "electricity",
+                "--nsample", "100",
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "debug. training and imputation healthcare dataset",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/exe_physio.py",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "--testmissingratio", "0.1",
+                "--nsample", "1",
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+    ]
+}
